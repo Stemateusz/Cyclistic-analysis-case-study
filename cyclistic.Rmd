@@ -1,0 +1,239 @@
+---
+title: "Cyclistic"
+author: "Mateusz Stempak"
+date: "2024-04-17"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# This is a case study from Coursera "Google Data Analytics Certificate"
+
+## Main question here: How does a bike-share navigate speedy success?
+
+My goal in this case study is to help create an insights for **new marketing strategy**. The company wants to have more customers who **choose yearly payment** instead of casual city bikes using. In order to do that, however, the team needs to better understand how annual members and casual riders differ and why casual riders would buy a membership, and how digital media could affect their marketing tactics.
+
+So I have to search answer to question: **How do annual members and casual riders use cyclistic bikes differently.** and **analyze historical bike trips to identify trends. The data I am using is public to explore.
+
+Data is localized in two .csv files representing values from I quarter of 2019 and 2020.
+
+## Loading necessary libraries and csv files
+I am assigning dataframes into two variables. Using conflicted package to manage conflicts. Setting dplyr::filter and dplyr::lag as default choices.
+
+```{r imports}
+library(tidyverse)
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
+cyclistic_2019 <- read.csv("Divvy_Trips_2019_Q1.csv")
+cyclistic_2020 <- read.csv("Divvy_Trips_2020_Q1.csv")
+
+```
+
+## Data wrangling and combining into a signle file
+
+Firstly I want to compare column names. Names of columns needs to be match perfectly before we can use a command to join them all.
+
+I use the colnames function.
+
+```{r checking colnames}
+colnames(cyclistic_2019)
+colnames(cyclistic_2020)
+```
+
+Renaming columns and matching cyclistic_2019 to the cyclistic_2020.
+
+```{r rename}
+cyclistic_2019 <- rename(cyclistic_2019
+                         ,"ride_id" = trip_id
+                         ,"rideable_type" = bikeid
+                         ,"started_at" = start_time
+                         ,"ended_at" = end_time
+                         ,"start_station_name" = from_station_name
+                         ,"start_station_id" = from_station_id
+                         ,"end_station_name" = to_station_name
+                         ,"end_station_id" = to_station_id
+                         ,"member_casual" = usertype
+                         )
+```
+
+Inspecting the dataframes. Looking for incongruencies.
+
+``` {r incongruencies}
+str(cyclistic_2019)
+str(cyclistic_2020)
+
+```
+Getting familiar with dataframes. I see that most of the columns are character variables.
+``` {r familiar}
+summary(cyclistic_2019)
+summary(cyclistic_2020)
+```
+Converting ride_id and rideable_type to character so that they can stack correctly.
+```{r converting ride_id}
+cyclistic_2019 <- mutate(cyclistic_2019, ride_id = as.character(ride_id)
+                         ,rideable_type = as.character(rideable_type))
+```
+Stacking individual quarter's data frames into one big dataframe.
+```{r creating big dataframe}
+all_trips <- bind_rows(cyclistic_2019, cyclistic_2020)
+```
+Removing lat, long, birthyear and gender fields as the data was dropped in 2020.
+```{r removing fields}
+all_trips <- all_trips |> 
+  select(-c(start_lat, start_lng, end_lat, end_lng, birthyear, gender, tripduration))
+```
+## Cleaning up and add data to prepare for analysis
+
+Inspecting the new table which I have created previously. Checking list of column names.
+```{r inspecting}
+colnames(all_trips) #List of column names
+```
+Number of rows in dataframe
+``` {r rows}
+nrow(all_trips) #number of rows in dataframe
+```
+Dimensions of the dataframe
+``` {r dimensions}
+dim(all_trips) #Dimensions of the dataframe
+```
+A tibble of first couple of rows
+``` {r first couple of rows}
+head(all_trips) #A tibble of first couple of rows
+```
+A list of columns with data types and set od example data
+``` {r list of columns}
+str(all_trips) #A list of columns with data types and set od example data
+```
+A summary of data
+``` {r summary_data}
+summary(all_trips) #A summary of data
+```
+There are few problems I see which have to be fixed:
+
+**1. The member_casual column** - There is inconsistency. There are two types of members, but we have two for each of them, named differently: "member" and "Subscriber", "Customer" and "casual". It must be consolidated.
+
+**2. There is lack of columns which can be grouped and aggregated** - There have to be new columns consisted of day, month, year.
+
+**3. There have to be a calculated field of trip duration** - there was such data, but only in 2019 .csv. I will create a "ride_length" column which will calculate the time spent on bike on trip.
+
+**4. There are some rides where tripduration shows negative values** - need to check this and delete if this is just an error.
+
+So starting from first point. Beginning by seeing how many observations go to each usertype:
+```{r member_casual}
+table(all_trips$member_casual)
+```
+We can see that there are more values assigned to names "casual" and "member" so I will stick with this nomenclature.
+
+Now is the time to reassign values:
+```{r reassign values}
+all_trips <- all_trips |> 
+  mutate(member_casual = recode(member_casual
+         ,"Subscriber" = "member"
+         ,"Customer" = "casual"))
+```
+
+Checking the change:
+```{r checking change}
+table(all_trips$member_casual)
+```
+Now is the time to add columns like: day, month, year of each ride. Then we can aggregate data on that levels.
+```{r splitting dates}
+all_trips$date <- as.Date(all_trips$started_at)
+all_trips$month <- format(as.Date(all_trips$date), "%m")
+all_trips$day <- format(as.Date(all_trips$date), "%d")
+all_trips$year <- format(as.Date(all_trips$date), "%Y")
+all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
+```
+Now adding a ride_length calculation to all_trips in seconds.
+```{r ride_length}
+all_trips$ride_length <- difftime(all_trips$ended_at, all_trips$started_at)
+```
+Inspecting actual structure of columns.
+```{r structure}
+str(all_trips)
+```
+Now I have to convert "ride_length" from Factor to numeric so I can run any calculations on the data
+```{r}
+is.factor(all_trips$ride_length)
+all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
+is.numeric(all_trips$ride_length)
+```
+Removing "bad" data. The dataframe includes a few hundred entries, when bikes were taken out of docks and checked for quality review or ride_length was negative. Creating a new version of dataframe since data is being removed.
+```{r}
+all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR" | all_trips$ride_length < 0),]
+```
+
+## Descriptive analysis
+Descriptive analysis on ride_length (in seconds).
+```{r}
+summary(all_trips_v2$ride_length)
+```
+Comparing members and casual users.
+```{r}
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = mean)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = median)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = max)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = min)
+```
+
+Now I want to see the average ride time by each day for members vs casual users
+```{r}
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+```
+The column **day_of_week_** is not sorted properly so I will do it anyway.
+```{r}
+all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels = c("poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"))
+```
+Now I want to check if it is in the right order: average ride time by each day for members vs casual users
+```{r}
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+```
+Now I can go for analyzing ridership data by type and weekday.
+```{r}
+all_trips_v2 |> 
+  mutate(weekday = wday(started_at, label = TRUE)) |> #creates weekday field using wday()
+  group_by(member_casual, weekday) |> #groups by usertype and weekday
+  summarise(number_of_rides = n(), average_duration = mean(ride_length)) |> #calculates the number of rides and average duration
+  arrange(member_casual, weekday)
+```
+Now it is time to start visualizing the number of rides by rider type.
+```{r}
+all_trips_v2 |> 
+  mutate(weekday = wday(started_at, label = TRUE)) |>
+  group_by(member_casual, weekday) |> 
+  summarise(number_of_rides = n(), average_duration = mean(ride_length)) |> 
+  arrange(member_casual, weekday) |> 
+  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")
+```
+I like it. We can see that there is a significant difference between member and casual riders. We can see that the days with smallest users are saturday and sunday, but also we can see that there is like near 100% more casual users than at working days. We can see also that there are nearly 100% less member users on weekend days: saturday and sunday. I can say that members primarily useage of bike are for work destination.
+
+Now I want to see that chart but with average duration as "y".
+```{r}
+all_trips_v2 |> 
+  mutate(weekday = wday(started_at, label = TRUE)) |>
+  group_by(member_casual, weekday) |> 
+  summarise(number_of_rides = n(), average_duration = mean(ride_length)) |> 
+  arrange(member_casual, weekday) |> 
+  ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
+  geom_col(position = "dodge")
+```
+It's interesting! We know that there are more bike rides from member users, but now we can see that they use them really small amount of time. On the other hand we see that casual users are hard users and there are no day when average duration are less than 30 minutes. Member users use bike for a really short time. We can assume that they use them in operational way (going to work) and casual more in recreational and sport way.
+
+Creating csv file for using in other softwares.
+```{r}
+counts <- aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+write.csv(counts, file = "C:\\Users\\m.stempak\\avg_ride_length.csv")
+```
+## Recommendations
+Based on analysis we I recommend:
+- to focus digital marketing campaigns on casual bikers who rides from thursdays to sunday - there are slightly more users then
+- as every person who uses Cycylistic bikes needs account, we have e-mail adresses, so we can create personalized communication for people who choose to ride more than 3 times - it's cheaper to be part of annual member.
+- also I recommend remarketing campaign for those users on facebooka and google ads.
+
+Mateusz Stempak
